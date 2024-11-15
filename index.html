@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Circle Label App</title>
+  <style>
+    .header { text-align: center; font-family: Arial, sans-serif; }
+    .header h1 { font-size: 20px; font-weight: bold; }
+    .header p { font-size: 16px; font-style: italic; }
+    #screen1, #screen2 { display: none; text-align: center; }
+    #screen1.active, #screen2.active { display: block; }
+    .instructions { font-size: 14px; }
+    .label-inputs { display: flex; flex-direction: column; align-items: center; }
+    .label-container { display: flex; align-items: center; margin-bottom: 10px; }
+    .label-container input[type="text"] { margin-right: 10px; }
+    .importance-buttons { display: flex; gap: 5px; }
+    .importance-button { padding: 2px 6px; font-size: 12px; cursor: pointer; background-color: lightgray; border: none; border-radius: 4px; }
+    .importance-button.selected { background-color: darkgray; font-weight: bold; }
+    .disabled { background-color: gray; cursor: not-allowed; }
+    .slider-container { display: flex; flex-wrap: wrap; justify-content: center; width: 600px; margin-top: 10px; }
+    .slider-wrapper { display: flex; align-items: center; flex-direction: column; margin: 10px; border: 2px solid transparent; border-radius: 5px; }
+    .slider-wrapper.selected { border-color: blue; }
+    .color-pickers { display: flex; gap: 5px; margin-top: 5px; }
+    canvas { display: block; margin: 0 auto; background-color: #f0f0f0; border: 1px solid #000; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>4D Healing</h1>
+    <p>Your doctor will <span style="text-decoration: underline;">see</span> you now.</p>
+  </div>
+  
+  <!-- Screen 1: Label Input Screen -->
+  <div id="screen1" class="active">
+    <p class="instructions">Instructions: List elements of your identity. In other words, what makes you who you are? Then select how important each element is to your overall identity. There are no wrong answers and you will be able to tweak these on the next screen.</p>
+    <div class="label-inputs" id="labelContainer">
+      <div class="label-container">
+        <input type="text" placeholder="Label 1" />
+        <div class="importance-buttons">
+          <button class="importance-button" onclick="setImportance(this)">Most Important</button>
+          <button class="importance-button" onclick="setImportance(this)">Very Important</button>
+          <button class="importance-button" onclick="setImportance(this)">Moderately Important</button>
+          <button class="importance-button" onclick="setImportance(this)">Slightly Important</button>
+        </div>
+      </div>
+    </div>
+    <div class="controls">
+      <button id="addLabel" onclick="addLabel()">Add Label</button>
+      <button id="removeLabel" onclick="removeLabel()">Remove Label</button>
+    </div>
+    <button id="nextScreen" class="disabled" onclick="navigateToScreen2()" disabled>Next</button>
+  </div>
+
+  <!-- Screen 2: Circle Interaction Screen -->
+  <div id="screen2">
+    <canvas id="circleCanvas" width="600" height="600"></canvas>
+    <div class="controls">
+      <button id="addCircle" onclick="addCircle()">Add Circle</button>
+      <button id="removeCircle" onclick="removeCircle()">Remove Circle</button>
+    </div>
+    <div class="slider-container" id="sliderContainer"></div>
+  </div>
+
+  <script>
+    const screen1 = document.getElementById('screen1');
+    const screen2 = document.getElementById('screen2');
+    const nextScreenBtn = document.getElementById('nextScreen');
+    const labelContainer = document.getElementById('labelContainer');
+    const canvas = document.getElementById('circleCanvas');
+    const ctx = canvas.getContext('2d');
+    const sliderContainer = document.getElementById('sliderContainer');
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    const largeCircleRadius = 250;
+
+    let circleData = [];
+    let selectedCircleIndex = null;
+    let draggingCircle = null;
+    let offsetX = 0, offsetY = 0;
+
+    function setImportance(button) {
+      const buttons = button.parentElement.querySelectorAll('.importance-button');
+      buttons.forEach(btn => btn.classList.remove('selected'));
+      button.classList.add('selected');
+      checkAllSelections();
+    }
+
+    function checkAllSelections() {
+      const allSelected = Array.from(labelContainer.children).every(container => {
+        return container.querySelector('.importance-button.selected') !== null;
+      });
+      nextScreenBtn.disabled = !allSelected;
+      nextScreenBtn.classList.toggle('disabled', !allSelected);
+    }
+
+    function addLabel() {
+      const labelDiv = document.createElement('div');
+      labelDiv.className = 'label-container';
+      labelDiv.innerHTML = `
+        <input type="text" placeholder="Label ${labelContainer.children.length + 1}" />
+        <div class="importance-buttons">
+          <button class="importance-button" onclick="setImportance(this)">Most Important</button>
+          <button class="importance-button" onclick="setImportance(this)">Very Important</button>
+          <button class="importance-button" onclick="setImportance(this)">Moderately Important</button>
+          <button class="importance-button" onclick="setImportance(this)">Slightly Important</button>
+        </div>`;
+      labelContainer.appendChild(labelDiv);
+      checkAllSelections();
+    }
+
+    function removeLabel() {
+      if (labelContainer.children.length > 1) {
+        labelContainer.removeChild(labelContainer.lastChild);
+        checkAllSelections();
+      }
+    }
+
+    function navigateToScreen2() {
+      if (nextScreenBtn.disabled) return;
+      const labels = Array.from(labelContainer.children).map(container => {
+        const labelText = container.querySelector('input[type="text"]').value.trim();
+        const selectedImportance = container.querySelector('.importance-button.selected').innerText;
+        const radius = getStartingSize(selectedImportance);
+        return { labelText, radius };
+      });
+
+      initializeCirclesWithLabels(labels);
+      screen1.classList.remove('active');
+      screen2.classList.add('active');
+      resolveCollisions(); // Ensure circles are not overlapping on load
+    }
+
+    function getStartingSize(importance) {
+      switch (importance) {
+        case 'Most Important': return 100;
+        case 'Very Important': return 75;
+        case 'Moderately Important': return 50;
+        case 'Slightly Important': return 25;
+        default: return 50;
+      }
+    }
+
+    function initializeCirclesWithLabels(labels) {
+      labels.forEach(({ labelText, radius }) => addCircle(labelText, radius));
+      resolveCollisions(); // Resolve overlaps immediately after adding circles
+      drawCircles();
+    }
+
+    function addCircle(label = `Circle ${circleData.length + 1}`, radius = 50) {
+      const angle = Math.random() * 2 * Math.PI;
+      const dist = Math.random() * (largeCircleRadius - radius);
+      const x = centerX + Math.cos(angle) * dist;
+      const y = centerY + Math.sin(angle) * dist;
+
+      circleData.push({ x, y, radius, label, circleColor: '#0096FF', textColor: '#000000' });
+      createSlider(circleData.length - 1, radius, label);
+      
+      resolveCollisions(); // Resolve any overlaps immediately after adding the circle
+      drawCircles();       // Redraw to reflect resolved positions
+    }
+
+    function removeCircle() {
+      if (selectedCircleIndex !== null) {
+        circleData.splice(selectedCircleIndex, 1);
+        sliderContainer.removeChild(sliderContainer.children[selectedCircleIndex]);
+        selectedCircleIndex = null;
+        drawCircles();
+      }
+    }
+
+    function createSlider(index, radius, labelText) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'slider-wrapper';
+
+      const labelInput = document.createElement('input');
+      labelInput.type = 'text';
+      labelInput.value = labelText;
+      labelInput.addEventListener('focus', () => selectCircle(index));
+      labelInput.addEventListener('input', () => updateCircleLabel(index, labelInput.value));
+
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = '5';
+      slider.max = '100';
+      slider.value = radius;
+      slider.addEventListener('input', () => {
+        selectCircle(index);
+        updateCircleSize(index, slider.value);
+      });
+
+      // Color pickers for circle and text color
+      const colorPickers = document.createElement('div');
+      colorPickers.className = 'color-pickers';
+
+      const circleColorPicker = document.createElement('input');
+      circleColorPicker.type = 'color';
+      circleColorPicker.value = circleData[index].circleColor;
+      circleColorPicker.addEventListener('focus', () => selectCircle(index));
+      circleColorPicker.addEventListener('input', () => updateCircleColor(index, circleColorPicker.value));
+
+      const textColorPicker = document.createElement('input');
+      textColorPicker.type = 'color';
+      textColorPicker.value = circleData[index].textColor;
+      textColorPicker.addEventListener('focus', () => selectCircle(index));
+      textColorPicker.addEventListener('input', () => updateTextColor(index, textColorPicker.value));
+
+      colorPickers.appendChild(circleColorPicker);
+      colorPickers.appendChild(textColorPicker);
+
+      wrapper.appendChild(labelInput);
+      wrapper.appendChild(slider);
+      wrapper.appendChild(colorPickers);
+      sliderContainer.appendChild(wrapper);
+    }
+
+    function updateCircleSize(index, newRadius) {
+      circleData[index].radius = parseFloat(newRadius);
+      resolveCollisions();
+      drawCircles();
+    }
+
+    function updateCircleLabel(index, newLabel) {
+      circleData[index].label = newLabel;
+      drawCircles();
+    }
+
+    function updateCircleColor(index, color) {
+      circleData[index].circleColor = color;
+      drawCircles();
+    }
+
+    function updateTextColor(index, color) {
+      circleData[index].textColor = color;
+      drawCircles();
+    }
+
+    function drawCircles() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // Draw large background circle as a guide
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, largeCircleRadius, 0, Math.PI * 2);
+      ctx.strokeStyle = '#999';
+      ctx.stroke();
+
+      // Draw each smaller circle
+      circleData.forEach(({ x, y, radius, label, circleColor, textColor }, index) => {
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = circleColor;
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = textColor;
+        ctx.font = `${Math.min(14, radius / 2)}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label || '', x, y);
+
+        if (index === selectedCircleIndex) {
+          highlightSlider(index);
+        }
+      });
+    }
+
+    function resolveCollisions() {
+      for (let i = 0; i < circleData.length; i++) {
+        for (let j = i + 1; j < circleData.length; j++) {
+          resolveOverlap(circleData[i], circleData[j]);
+        }
+      }
+      drawCircles();
+    }
+
+    function resolveOverlap(circle1, circle2) {
+      const dist = Math.sqrt((circle2.x - circle1.x) ** 2 + (circle2.y - circle1.y) ** 2);
+      const overlap = circle1.radius + circle2.radius - dist;
+
+      if (overlap > 0) {
+        const angle = Math.atan2(circle2.y - circle1.y, circle2.x - circle1.x);
+        const moveX = (overlap / 2) * Math.cos(angle);
+        const moveY = (overlap / 2) * Math.sin(angle);
+
+        circle1.x -= moveX;
+        circle1.y -= moveY;
+        circle2.x += moveX;
+        circle2.y += moveY;
+      }
+    }
+
+    // Dragging functionality without boundary restriction
+    canvas.addEventListener('mousedown', (event) => {
+      const { offsetX: mouseX, offsetY: mouseY } = event;
+
+      circleData.forEach((circle, index) => {
+        if (Math.sqrt((mouseX - circle.x) ** 2 + (mouseY - circle.y) ** 2) <= circle.radius) {
+          selectCircle(index);
+          draggingCircle = circle;
+          offsetX = mouseX - circle.x;
+          offsetY = mouseY - circle.y;
+        }
+      });
+    });
+
+    canvas.addEventListener('mousemove', (event) => {
+      if (draggingCircle) {
+        const mouseX = event.offsetX;
+        const mouseY = event.offsetY;
+
+        draggingCircle.x = mouseX - offsetX;
+        draggingCircle.y = mouseY - offsetY;
+
+        resolveCollisions();
+        drawCircles();
+      }
+    });
+
+    canvas.addEventListener('mouseup', () => {
+      draggingCircle = null;
+    });
+
+    function selectCircle(index) {
+      selectedCircleIndex = index;
+      highlightSlider(index);
+      drawCircles();
+    }
+
+    function highlightSlider(index) {
+      Array.from(sliderContainer.children).forEach((child, idx) => {
+        child.classList.toggle('selected', idx === index);
+      });
+    }
+  </script>
+</body>
+</html>
